@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<!--
+==============================================================================
+File        : templates/mongodb_inventory.html
+Location    : /data/database-management/templates/mongodb_inventory.html
+Purpose     : MongoDB inventory listing template.
+Author      : Madan U
+Email       : madan.u@kotak.com
+Created On  : 2026-09-07
+Last Update : 2026-09-07
+==============================================================================
+-->
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MongoDB Inventory</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="./css/styles.css" rel="stylesheet" />
+</head>
+<body>
+  <div class="app-layout">
+    <div id="sidebar-mount"></div>
+    <div class="main-area">
+      <div id="topbar-mount"></div>
+      <div class="content">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div>
+            <h4 class="fw-bold mb-0">MongoDB Inventory</h4>
+            <p class="text-muted small mb-0">Complete inventory of MongoDB servers across all environments</p>
+          </div>
+          <button class="btn btn-primary admin-only d-none" id="addServerBtn">
+            <i class="bi bi-plus-lg"></i> Add Server
+          </button>
+        </div>
+
+        <!-- Summary cards -->
+        <div class="row g-3 mb-4">
+          <div class="col-6 col-lg-3">
+            <div class="stat-card">
+              <div class="stat-icon green"><i class="bi bi-server"></i></div>
+              <div><div class="stat-value" id="sTotal">0</div><div class="stat-label">Total Servers</div></div>
+            </div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="stat-card">
+              <div class="stat-icon teal"><i class="bi bi-shield-check"></i></div>
+              <div><div class="stat-value" id="sPrimary">0</div><div class="stat-label">Primary Nodes</div></div>
+            </div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="stat-card">
+              <div class="stat-icon blue"><i class="bi bi-arrow-repeat"></i></div>
+              <div><div class="stat-value" id="sSecondary">0</div><div class="stat-label">Secondary Nodes</div></div>
+            </div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="stat-card">
+              <div class="stat-icon red"><i class="bi bi-cpu"></i></div>
+              <div><div class="stat-value" id="sAlerts">0</div><div class="stat-label">High CPU/Disk Alerts</div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="card">
+          <div class="card-body">
+            <div class="table-toolbar">
+              <div class="search-box">
+                <i class="bi bi-search"></i>
+                <input type="text" class="form-control" id="searchInput" placeholder="Search by hostname, IP, application, or owner..." />
+              </div>
+              <select class="form-select" id="envFilter" style="width:auto;">
+                <option value="">All Environments</option>
+                <option value="PROD">PROD</option>
+                <option value="UAT">UAT</option>
+                <option value="TEST">TEST</option>
+                <option value="DEV">DEV</option>
+              </select>
+              <select class="form-select" id="sortBy" style="width:auto;">
+                <option value="hostname">Sort: Hostname</option>
+                <option value="db_version">Sort: Version</option>
+                <option value="status">Sort: Status</option>
+                <option value="app_owner">Sort: Owner</option>
+                <option value="environment">Sort: Environment</option>
+              </select>
+              <button class="btn btn-outline-secondary btn-sm" id="refreshBtn">
+                <i class="bi bi-arrow-clockwise"></i> Refresh
+              </button>
+              <button class="btn btn-outline-secondary btn-sm" id="exportBtn">
+                <i class="bi bi-download"></i> Export CSV
+              </button>
+            </div>
+
+            <div class="table-responsive">
+              <table class="table table-hover align-middle">
+                <thead>
+                  <tr>
+                    <th>Hostname</th>
+                    <th>IP Address</th>
+                    <th>Environment</th>
+                    <th>Application</th>
+                    <th>App Owner</th>
+                    <th>OS</th>
+                    <th>Edition</th>
+                    <th>Version</th>
+                    <th>Replica Set</th>
+                    <th>Role</th>
+                    <th>CPU</th>
+                    <th>RAM</th>
+                    <th>Storage</th>
+                    <th>Status</th>
+                    <th>Last Check</th>
+                    <th class="admin-only d-none text-end">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="inventoryBody"></tbody>
+              </table>
+            </div>
+            <div id="noResults" class="text-center text-muted py-4 d-none">
+              <i class="bi bi-inbox" style="font-size:32px;"></i>
+              <p class="mt-2">No servers match your search.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalMount"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="./js/app.js"></script>
+  <script>
+    requireAuth();
+    document.getElementById('sidebar-mount').innerHTML = renderSidebar('mongodb');
+    document.getElementById('topbar-mount').innerHTML = renderTopbar('MongoDB Inventory');
+    injectServerModals('modalMount');
+    applyRoleVisibility();
+
+    let ALL_SERVERS = [];
+    let filtered = [];
+
+    async function loadServers() {
+      ALL_SERVERS = await apiGetServers();
+      applyFilters();
+      updateSummary();
+    }
+
+    function updateSummary() {
+      document.getElementById('sTotal').textContent = ALL_SERVERS.length;
+      document.getElementById('sPrimary').textContent = ALL_SERVERS.filter(s => s.replica_role === 'PRIMARY').length;
+      document.getElementById('sSecondary').textContent = ALL_SERVERS.filter(s => s.replica_role === 'SECONDARY').length;
+      document.getElementById('sAlerts').textContent = ALL_SERVERS.filter(s => s.status === 'warning' || s.status === 'offline').length;
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById('inventoryBody');
+      const noResults = document.getElementById('noResults');
+      if (filtered.length === 0) {
+        tbody.innerHTML = '';
+        noResults.classList.remove('d-none');
+        return;
+      }
+      noResults.classList.add('d-none');
+      const admin = isAdmin();
+      tbody.innerHTML = filtered.map(s => `
+        <tr onclick="window.location.href='./server_detail.html?id=${s.id}'">
+          <td class="fw-semibold">${s.hostname}</td>
+          <td>${s.ip}</td>
+          <td>${envBadge(s.environment)}</td>
+          <td>${s.app_name}</td>
+          <td>${s.app_owner}</td>
+          <td>${s.os_type} ${s.os_version}</td>
+          <td>${s.db_edition}</td>
+          <td>${s.db_version}</td>
+          <td>${s.replica_set || '<span class="text-muted">—</span>'}</td>
+          <td>${roleBadge(s.replica_role)}</td>
+          <td>${s.cpu_cores} vCPU</td>
+          <td>${s.ram_gb} GB</td>
+          <td>${s.storage_gb} GB</td>
+          <td>${statusBadge(s.status)}</td>
+          <td class="small text-muted">${s.last_check}</td>
+          ${admin ? `
+          <td class="text-end" onclick="event.stopPropagation();">
+            <button class="btn btn-sm btn-outline-secondary" title="Edit" onclick='editServerRow(${s.id})'><i class="bi bi-pencil"></i></button>
+            <button class="btn btn-sm btn-outline-danger" title="Delete" onclick="deleteServerRow(${s.id}, '${s.hostname}')"><i class="bi bi-trash"></i></button>
+          </td>` : ''}
+        </tr>
+      `).join('');
+    }
+
+    function editServerRow(id) {
+      const server = ALL_SERVERS.find(s => s.id === id);
+      openServerModal(server);
+    }
+    function deleteServerRow(id, name) {
+      confirmDeleteServer(id, name, loadServers);
+    }
+
+    function applyFilters() {
+      const q = document.getElementById('searchInput').value.toLowerCase().trim();
+      const env = document.getElementById('envFilter').value;
+      const sort = document.getElementById('sortBy').value;
+
+      filtered = ALL_SERVERS.filter(s => {
+        const matchQ = !q || s.hostname.toLowerCase().includes(q) || s.ip.includes(q) || s.app_name.toLowerCase().includes(q) || (s.app_owner || '').toLowerCase().includes(q);
+        const matchEnv = !env || s.environment === env;
+        return matchQ && matchEnv;
+      });
+
+      filtered.sort((a, b) => {
+        if (sort === 'hostname') return a.hostname.localeCompare(b.hostname);
+        if (sort === 'db_version') return (b.db_version || '').localeCompare(a.db_version || '');
+        if (sort === 'status') return a.status.localeCompare(b.status);
+        if (sort === 'app_owner') return (a.app_owner || '').localeCompare(b.app_owner || '');
+        if (sort === 'environment') return a.environment.localeCompare(b.environment);
+        return 0;
+      });
+
+      renderTable();
+    }
+
+    document.getElementById('searchInput').addEventListener('input', applyFilters);
+    document.getElementById('envFilter').addEventListener('change', applyFilters);
+    document.getElementById('sortBy').addEventListener('change', applyFilters);
+
+    document.getElementById('refreshBtn').addEventListener('click', function() {
+      this.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Refreshing...';
+      loadServers().then(() => {
+        this.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Refresh';
+      });
+    });
+
+    document.getElementById('exportBtn').addEventListener('click', function() {
+      const headers = ['Hostname','IP','SSH Port','DB Port','Environment','Application','App Owner','Server Owner','OS','Edition','Version','Replica Set','Role','CPU','RAM (GB)','Storage (GB)','Status','Last Check'];
+      const rows = filtered.map(s => [s.hostname,s.ip,s.ssh_port,s.db_port,s.environment,s.app_name,s.app_owner,s.server_owner,`${s.os_type} ${s.os_version}`,s.db_edition,s.db_version,s.replica_set,s.replica_role,s.cpu_cores,s.ram_gb,s.storage_gb,s.status,s.last_check]);
+      exportCSV('mongodb_inventory.csv', [headers, ...rows]);
+    });
+
+    document.getElementById('addServerBtn')?.addEventListener('click', () => openServerModal(null));
+    document.getElementById('serverFormSave').addEventListener('click', () => saveServerForm(loadServers));
+
+    loadServers();
+  </script>
+</body>
+</html>
